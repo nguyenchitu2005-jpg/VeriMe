@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// Luật bảo mật Cloud Firestore cho VeriMe.
+// Dán toàn bộ nội dung file này vào: Firebase Console → Firestore Database → Rules → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Bảng tra cứu "tên đăng nhập → email" để đăng nhập bằng tên đăng nhập.
+    // Mã tài liệu = tên đăng nhập viết thường; nội dung {uid, email, username, createdAt}.
+    match /usernames/{name} {
+      // Ai cũng tra được 1 tên (cần trước khi đăng nhập), nhưng không liệt kê được cả bảng.
+      allow get: if true;
+      allow list: if false;
+
+      // Chỉ chủ tài khoản được giữ tên cho chính mình, đúng email của mình,
+      // và chỉ tạo mới (tên đã có người dùng thì không ghi đè được).
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['uid', 'email', 'username', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.username.lower() == name
+        && name.matches('^[a-z0-9._-]{3,30}$')
+        && request.resource.data.createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
+
+    // Dữ liệu riêng của từng tài khoản để dùng trên máy khác: vector khuôn mặt (không phải ảnh).
+    // Chỉ chủ tài khoản đọc/ghi/xoá được.
+    match /users/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['faceEmbedding', 'faceUpdatedAt'])
+        && request.resource.data.faceEmbedding is list
+        && request.resource.data.faceEmbedding.size() <= 1024
+        && request.resource.data.faceUpdatedAt == request.time;
+    }
+
+    // Mọi thứ khác: cấm.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
